@@ -63,7 +63,6 @@ const resizeImage = async (file) => {
     pipeline.jpeg({ quality: Math.max(1, Math.min(quality, 100)), mozjpeg: true });
   }
 
-  // Jika in-place, tulis ke file sementara lalu ganti
   if (IN_PLACE && outputPath === inputPath) {
     const tempPath = `${outputPath}.tmp-resize`;
     await pipeline.toFile(tempPath);
