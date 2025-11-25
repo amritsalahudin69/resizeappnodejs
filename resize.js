@@ -30,10 +30,29 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
 const isImage = (filename) => /\.(jpe?g|png|webp)$/i.test(filename);
 
-const resizeImage = async (file) => {
-  const inputPath = path.join(SOURCE_DIR, file);
-  const outputPath = path.join(OUTPUT_DIR, file);
-  const ext = path.extname(file).toLowerCase();
+const listImages = (dir, base = SOURCE_DIR) => {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const absPath = path.join(dir, entry.name);
+    // Jika output folder berada di dalam source, hindari memprosesnya ketika bukan in-place
+    if (!IN_PLACE && path.resolve(absPath).startsWith(path.resolve(OUTPUT_DIR))) {
+      continue;
+    }
+    if (entry.isDirectory()) {
+      files.push(...listImages(absPath, base));
+    } else if (entry.isFile() && isImage(entry.name)) {
+      const relative = path.relative(base, absPath);
+      files.push(relative);
+    }
+  }
+  return files;
+};
+
+const resizeImage = async (relativePath) => {
+  const inputPath = path.join(SOURCE_DIR, relativePath);
+  const outputPath = path.join(OUTPUT_DIR, relativePath);
+  const ext = path.extname(relativePath).toLowerCase();
   const stat = fs.statSync(inputPath);
   const minBytes = Number.isFinite(minSizeKb) && minSizeKb > 0 ? minSizeKb * 1024 : 0;
 
@@ -65,9 +84,11 @@ const resizeImage = async (file) => {
 
   if (IN_PLACE && outputPath === inputPath) {
     const tempPath = `${outputPath}.tmp-resize`;
+    fs.mkdirSync(path.dirname(tempPath), { recursive: true });
     await pipeline.toFile(tempPath);
     fs.renameSync(tempPath, outputPath);
   } else {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
     await pipeline.toFile(outputPath);
   }
 
@@ -75,13 +96,10 @@ const resizeImage = async (file) => {
 };
 
 const run = async () => {
-  const files = fs.readdirSync(SOURCE_DIR).filter((file) => {
-    const fullPath = path.join(SOURCE_DIR, file);
-    return fs.statSync(fullPath).isFile() && isImage(file);
-  });
+  const files = listImages(SOURCE_DIR);
 
   if (!files.length) {
-    console.log('Tidak ada file gambar di folder source.');
+    console.log('Tidak ada file gambar di folder source (termasuk subfolder).');
     return;
   }
 
@@ -97,10 +115,10 @@ const run = async () => {
         console.log(`- ${file} (skip: ${result.reason})`);
       } else {
         success += 1;
-        console.log(`✓ ${file}`);
+        console.log(`OK ${file}`);
       }
     } catch (err) {
-      console.error(`✗ ${file}: ${err.message}`);
+      console.error(`ERR ${file}: ${err.message}`);
     }
   }
 
