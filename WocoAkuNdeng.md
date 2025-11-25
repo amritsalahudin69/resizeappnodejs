@@ -1,5 +1,7 @@
 How to used :
 
+npm install
+
 In-place resize (tanpa output folder terpisah):
 npm run resize -- --in-place --width 1200 --quality 80 --min-size-kb 500
 
