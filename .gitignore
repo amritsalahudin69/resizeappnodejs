@@ -1,3 +1,12 @@
 node_modules/
 output/
 npm-debug.log
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.tiff
+*.svg
+*.db
+.DS_Store

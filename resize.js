@@ -2,9 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 
-const SOURCE_DIR = path.resolve(__dirname, 'source');
-const OUTPUT_DIR = path.resolve(__dirname, 'output');
-
 const args = process.argv.slice(2);
 
 const getArg = (flag, fallback) => {
@@ -14,9 +11,15 @@ const getArg = (flag, fallback) => {
   return val === undefined ? fallback : val;
 };
 
+const SOURCE_DIR = path.resolve(__dirname, 'source');
+const argOutput = getArg('--output', 'output');
+const IN_PLACE = args.includes('--in-place');
+const OUTPUT_DIR = IN_PLACE ? SOURCE_DIR : path.resolve(__dirname, argOutput);
+
 const width = parseInt(getArg('--width', '1200'), 10);
 const height = parseInt(getArg('--height', '0'), 10);
 const quality = parseInt(getArg('--quality', '80'), 10);
+const minSizeKb = parseInt(getArg('--min-size-kb', '500'), 10); // hanya proses file >= ukuran ini
 
 if (!fs.existsSync(SOURCE_DIR)) {
   console.error(`Folder sumber tidak ditemukan: ${SOURCE_DIR}`);
@@ -31,6 +34,19 @@ const resizeImage = async (file) => {
   const inputPath = path.join(SOURCE_DIR, file);
   const outputPath = path.join(OUTPUT_DIR, file);
   const ext = path.extname(file).toLowerCase();
+  const stat = fs.statSync(inputPath);
+  const minBytes = Number.isFinite(minSizeKb) && minSizeKb > 0 ? minSizeKb * 1024 : 0;
+
+  // Skip jika file kecil dan dimensi tidak melebihi target (hindari re-resize)
+  const metadata = await sharp(inputPath).metadata();
+  const needBySize = minBytes > 0 ? stat.size >= minBytes : true;
+  const needByDim =
+    (Number.isFinite(width) && width > 0 && metadata.width && metadata.width > width) ||
+    (Number.isFinite(height) && height > 0 && metadata.height && metadata.height > height);
+
+  if (!needBySize && !needByDim) {
+    return { status: 'skipped', reason: 'kecil' };
+  }
 
   const pipeline = sharp(inputPath).resize({
     width: Number.isFinite(width) && width > 0 ? width : null,
@@ -47,8 +63,16 @@ const resizeImage = async (file) => {
     pipeline.jpeg({ quality: Math.max(1, Math.min(quality, 100)), mozjpeg: true });
   }
 
-  await pipeline.toFile(outputPath);
-  return outputPath;
+  // Jika in-place, tulis ke file sementara lalu ganti
+  if (IN_PLACE && outputPath === inputPath) {
+    const tempPath = `${outputPath}.tmp-resize`;
+    await pipeline.toFile(tempPath);
+    fs.renameSync(tempPath, outputPath);
+  } else {
+    await pipeline.toFile(outputPath);
+  }
+
+  return { status: 'done', outputPath };
 };
 
 const run = async () => {
@@ -64,18 +88,29 @@ const run = async () => {
 
   console.log(`Memproses ${files.length} gambar...`);
   let success = 0;
+  let skipped = 0;
 
   for (const file of files) {
     try {
-      await resizeImage(file);
-      success += 1;
-      console.log(`✓ ${file}`);
+      const result = await resizeImage(file);
+      if (result.status === 'skipped') {
+        skipped += 1;
+        console.log(`- ${file} (skip: ${result.reason})`);
+      } else {
+        success += 1;
+        console.log(`✓ ${file}`);
+      }
     } catch (err) {
       console.error(`✗ ${file}: ${err.message}`);
     }
   }
 
-  console.log(`Selesai. Berhasil: ${success}/${files.length}. Hasil ada di folder ${OUTPUT_DIR}.`);
+  console.log(
+    `Selesai. Berhasil: ${success}, dilewati: ${skipped}, total: ${files.length}. Hasil di ${OUTPUT_DIR}.`
+  );
 };
 
 run();
+
+
+// run : npm run resize -- --in-place --width 1200 --quality 80 --min-size-kb 500
